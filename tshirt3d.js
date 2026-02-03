@@ -1,3 +1,6 @@
+// Three.js imports from Skypack CDN
+// Note: If Skypack fails on mobile, browser will show console errors
+// Alternative CDNs: unpkg.com, jsdelivr.net, esm.sh
 import * as THREE from 'https://cdn.skypack.dev/three@0.132.2/build/three.module.js';
 import { GLTFLoader } from 'https://cdn.skypack.dev/three@0.132.2/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'https://cdn.skypack.dev/three@0.132.2/examples/jsm/controls/OrbitControls.js';
@@ -47,7 +50,31 @@ function createModal() {
     }
 }
 
+function checkWebGLSupport() {
+    try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (!gl) {
+            console.error('WebGL not supported');
+            return false;
+        }
+        return true;
+    } catch (e) {
+        console.error('WebGL check failed:', e);
+        return false;
+    }
+}
+
 function setupScene() {
+    // Check WebGL support (critical for mobile)
+    if (!checkWebGLSupport()) {
+        const loadingEl = document.getElementById('loading-3d');
+        if (loadingEl) {
+            loadingEl.innerHTML = '<p style="color:#ef4444; padding:1rem; text-align:center;">Your device does not support 3D graphics (WebGL).</p>';
+        }
+        return;
+    }
+
     const container = document.getElementById('canvas-container-3d');
 
     scene = new THREE.Scene();
@@ -56,11 +83,22 @@ function setupScene() {
     camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
     camera.position.set(0, 0.5, 2.5);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    // Detect mobile for performance optimization
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    renderer = new THREE.WebGLRenderer({
+        antialias: !isMobile, // Disable antialiasing on mobile for performance
+        alpha: true,
+        powerPreference: isMobile ? 'low-power' : 'high-performance'
+    });
+
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Lower pixel ratio on mobile to improve performance
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
+    renderer.shadowMap.enabled = !isMobile; // Disable shadows on mobile
+    if (!isMobile) {
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    }
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
 
@@ -102,45 +140,72 @@ function setupLights() {
 function loadTShirtModel() {
     const loader = new GLTFLoader();
     const loadingEl = document.getElementById('loading-3d');
-    const modelUrl = 'assets/black-tshirt-1.0.glb';
+
+    // Use absolute path for deployment compatibility
+    const getModelPath = () => {
+        // Try relative path first, fallback to absolute
+        const relativePath = 'assets/black-tshirt-1.0.glb';
+        const base = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
+        return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? relativePath
+            : `${base}/${relativePath}`;
+    };
+
+    const modelUrl = getModelPath();
 
     loadingEl.classList.remove('hidden');
 
-    loader.load(modelUrl, function (gltf) {
-        tshirtModel = gltf.scene;
+    console.log('Loading 3D model from:', modelUrl);
 
-        const box = new THREE.Box3().setFromObject(tshirtModel);
-        const center = box.getCenter(new THREE.Vector3());
-        tshirtModel.position.sub(center);
+    loader.load(
+        modelUrl,
+        function (gltf) {
+            tshirtModel = gltf.scene;
 
-        const size = box.getSize(new THREE.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z);
-        const scale = 2.5 / maxDim;
-        tshirtModel.scale.set(scale, scale, scale);
+            const box = new THREE.Box3().setFromObject(tshirtModel);
+            const center = box.getCenter(new THREE.Vector3());
+            tshirtModel.position.sub(center);
 
-        tshirtModel.traverse((node) => {
-            if (node.isMesh) {
-                node.castShadow = true;
-                node.receiveShadow = true;
-                const oldMat = node.material;
-                node.material = new THREE.MeshStandardMaterial({
-                    color: 0xffffff,
-                    roughness: 0.6,
-                    metalness: 0.1,
-                    normalMap: oldMat.normalMap || null,
-                    aoMap: oldMat.aoMap || null,
-                    side: THREE.DoubleSide
-                });
-            }
-        });
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const scale = 2.5 / maxDim;
+            tshirtModel.scale.set(scale, scale, scale);
 
-        scene.add(tshirtModel);
-        loadingEl.classList.add('hidden');
+            tshirtModel.traverse((node) => {
+                if (node.isMesh) {
+                    node.castShadow = true;
+                    node.receiveShadow = true;
+                    const oldMat = node.material;
+                    node.material = new THREE.MeshStandardMaterial({
+                        color: 0xffffff,
+                        roughness: 0.6,
+                        metalness: 0.1,
+                        normalMap: oldMat.normalMap || null,
+                        aoMap: oldMat.aoMap || null,
+                        side: THREE.DoubleSide
+                    });
+                }
+            });
 
-    }, undefined, function (error) {
-        console.error('An error occurred loading the model:', error);
-        loadingEl.innerHTML = '<p style="color:red">Error loading 3D Model</p>';
-    });
+            scene.add(tshirtModel);
+            loadingEl.classList.add('hidden');
+            console.log('3D model loaded successfully');
+        },
+        function (xhr) {
+            // Progress callback
+            const percentComplete = xhr.total > 0 ? (xhr.loaded / xhr.total * 100).toFixed(2) : 0;
+            console.log(`Loading 3D model: ${percentComplete}%`);
+        },
+        function (error) {
+            console.error('3D Model Load Error:', {
+                message: error.message,
+                url: modelUrl,
+                userAgent: navigator.userAgent,
+                error: error
+            });
+            loadingEl.innerHTML = '<p style="color:#ef4444; padding:1rem; text-align:center;">Failed to load 3D model.<br>Please check your connection.</p>';
+        }
+    );
 }
 
 // Helper to set color
