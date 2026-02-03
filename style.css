@@ -804,6 +804,11 @@ body {
     .presets-grid {
         grid-template-columns: repeat(2, 1fr);
     }
+
+    .preset-item {
+        height: 130px;
+        /* Maintain good size even on smallest screens */
+    }
 }
 
 /* Animations */
